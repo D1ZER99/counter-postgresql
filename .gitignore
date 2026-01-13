@@ -1,0 +1,23 @@
+# PostgreSQL data directory
+postgres_data/
+
+# Environment variables (if containing sensitive data)
+# .env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
