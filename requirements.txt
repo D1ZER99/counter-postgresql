@@ -4,5 +4,8 @@ psycopg2-binary==2.9.9
 # Alternative: psycopg3 (newer version)
 # psycopg[binary]==3.1.18
 
+# Progress bar
+tqdm==4.66.1
+
 # For connection pooling (if needed in later parts)
 # psycopg2-pool==1.1

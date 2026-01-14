@@ -1,0 +1,48 @@
+======================================================================
+Implementation 01: Lost-update (Race Condition Demo)
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-13 20:45:29.885
+End time: 2026-01-13 20:57:19.649
+Execution time: 709.76 seconds
+Throughput: 140.89 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 10167
+Expected counter value: 100000
+
+RACE CONDITION ANALYSIS
+----------------------------------------------------------------------
+Lost updates: 89833
+Loss percentage: 89.83%
+Successfully applied updates: 10167
+Success rate: 10.17%
+
+EXPLANATION
+----------------------------------------------------------------------
+This implementation demonstrates the 'lost-update' problem:
+1. Thread A reads counter = 100
+2. Thread B reads counter = 100 (same value)
+3. Thread A increments to 101 and writes it
+4. Thread B increments to 101 and writes it (overwriting A's update)
+5. Result: Only 1 increment applied instead of 2
+
+This is a classic race condition that occurs when:
+- Multiple threads access shared data concurrently
+- No synchronization mechanism is used
+- The read-modify-write cycle is not atomic
+
+======================================================================

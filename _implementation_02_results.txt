@@ -1,0 +1,121 @@
+======================================================================
+Implementation 02: SERIALIZABLE Transaction Isolation Level
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Isolation Level: SERIALIZABLE
+Retry Logic: DISABLED
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-14 15:07:03.246
+End time: 2026-01-14 15:09:35.922
+Execution time: 152.68 seconds
+Throughput: 654.98 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 10431
+Expected counter value: 100000
+Lost updates: 89569
+Loss percentage: 89.57%
+
+ERROR STATISTICS
+----------------------------------------------------------------------
+Successful transactions: 10,431
+Failed transactions: 89,569
+Serialization errors: 89,569
+Other errors: 0
+
+ANALYSIS - ANSWERS TO KEY QUESTIONS
+======================================================================
+
+Q1: Will there be any loss of values?
+----------------------------------------------------------------------
+ANSWER: YES - Without retry logic, there IS value loss.
+Lost updates: 89569 (89.57%)
+Serialization errors: 89,569
+
+When SERIALIZABLE isolation detects a conflict, it throws a
+SerializationFailure error and rolls back the transaction.
+Without retry logic, these rolled-back transactions are lost,
+resulting in a lower final counter value.
+
+Q2: Will there be any errors?
+----------------------------------------------------------------------
+ANSWER: YES - Serialization errors WILL occur.
+Serialization errors encountered: 89,569
+
+PostgreSQL's SERIALIZABLE isolation level detects when concurrent
+transactions would violate serializability. When this happens,
+it throws a SerializationFailure error:
+  psycopg2.errors.SerializationFailure
+
+This is by design - SERIALIZABLE prevents anomalies by detecting
+conflicts and forcing one transaction to retry.
+
+Q3: Can we modify the code to always get the correct result?
+----------------------------------------------------------------------
+ANSWER: YES - By implementing retry logic!
+
+This test ran WITHOUT retry logic.
+To get correct results, the code should:
+
+1. Catch SerializationFailure exceptions
+2. Roll back the failed transaction
+3. Retry the entire transaction
+4. Use exponential backoff to reduce contention
+
+Example retry pattern:
+  attempts = 0
+  while attempts < MAX_RETRIES:
+    try:
+      # ... transaction code ...
+      conn.commit()
+      break  # Success!
+    except SerializationFailure:
+      conn.rollback()
+      attempts += 1
+      time.sleep(0.001 * attempts)  # Exponential backoff
+
+With proper retry logic, SERIALIZABLE isolation level provides:
+- Complete consistency (no lost updates)
+- Serializability guarantee
+- Protection against all anomalies
+
+COMPARISON WITH IMPLEMENTATION 01
+----------------------------------------------------------------------
+Implementation 01 (READ COMMITTED, no locking):
+  - Silent data loss (~90% lost updates)
+  - No errors thrown
+  - Faster execution
+  - Incorrect results
+
+Implementation 02 (SERIALIZABLE):
+  - Detects conflicts
+  - Throws serialization errors
+  - Without retry: Data loss (but errors are visible)
+  - Faster than with retry
+
+KEY TAKEAWAYS
+----------------------------------------------------------------------
+1. SERIALIZABLE isolation level DETECTS conflicts that would be
+   silently lost with lower isolation levels.
+
+2. Applications MUST implement retry logic to handle serialization
+   failures and achieve correct results.
+
+3. SERIALIZABLE provides the strongest consistency guarantees but
+   at the cost of increased errors and need for retry logic.
+
+4. The errors are a FEATURE, not a bug - they prevent data anomalies.
+
+======================================================================
