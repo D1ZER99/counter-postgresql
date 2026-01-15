@@ -1,0 +1,245 @@
+======================================================================
+Implementation 04: Row-Level Locking (SELECT ... FOR UPDATE)
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Locking method: SELECT ... FOR UPDATE (row-level exclusive lock)
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-14 17:58:06.161
+End time: 2026-01-14 18:15:11.605
+Execution time: 1025.44 seconds
+Throughput: 97.52 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 100000
+Expected counter value: 100000
+Lost updates: 0
+Loss percentage: 0.00%
+
+OPERATION STATISTICS
+----------------------------------------------------------------------
+Successful operations: 100,000
+Failed operations: 0
+Errors encountered: 0
+Success rate: 100.00%
+
+ANALYSIS
+======================================================================
+
+How SELECT ... FOR UPDATE Works
+----------------------------------------------------------------------
+SELECT ... FOR UPDATE is PostgreSQL's row-level locking mechanism:
+
+SQL Statement:
+  SELECT counter FROM user_counter WHERE user_id = 1 FOR UPDATE
+
+What happens:
+
+1. LOCK ACQUISITION
+   - The SELECT acquires an exclusive lock on the matching row
+   - This lock prevents other transactions from reading or writing
+   - The lock is held until COMMIT or ROLLBACK
+
+2. BLOCKING BEHAVIOR
+   - If another transaction tries to SELECT ... FOR UPDATE the same row,
+     it WAITS (blocks) until the first transaction commits
+   - No error is thrown - transactions queue up and wait their turn
+
+3. SEQUENTIAL EXECUTION
+   - Even though we have 10 concurrent threads,
+     they execute the critical section sequentially
+   - Each thread waits for the previous one to commit
+
+4. GUARANTEED CONSISTENCY
+   - Each transaction reads the LATEST committed value
+   - No race condition possible
+   - All increments are applied correctly
+
+Why This Implementation Works
+----------------------------------------------------------------------
+Key advantages of SELECT ... FOR UPDATE:
+
+1. EXPLICIT LOCKING
+   - Developer controls exactly when and what to lock
+   - Lock is acquired during SELECT, not UPDATE
+   - Protects the entire read-modify-write cycle
+
+2. NO SERIALIZATION ERRORS
+   - Unlike SERIALIZABLE isolation, no errors are thrown
+   - Transactions wait instead of failing
+   - No retry logic needed
+
+3. WORKS WITH READ COMMITTED
+   - No need for SERIALIZABLE isolation level
+   - Default isolation level (READ COMMITTED) is sufficient
+   - Lower overhead than SERIALIZABLE
+
+4. GUARANTEED CORRECTNESS
+   - Each transaction sees the latest value
+   - No lost updates
+   - Simpler than SERIALIZABLE + retry
+
+Transaction Flow Example
+----------------------------------------------------------------------
+Time | Thread 1              | Thread 2              | Counter
+-----|----------------------|----------------------|--------
+t1   | SELECT FOR UPDATE    | -                    | 100
+t2   | (lock acquired)      | SELECT FOR UPDATE    | 100
+t3   | counter = 101        | (waiting for lock)   | 100
+t4   | UPDATE counter=101   | (waiting...)         | 100
+t5   | COMMIT               | (waiting...)         | 101
+t6   | (lock released)      | (lock acquired!)     | 101
+t7   | -                    | counter = 102        | 101
+t8   | -                    | UPDATE counter=102   | 101
+t9   | -                    | COMMIT               | 102
+
+Result: Both increments applied correctly (100 -> 101 -> 102)
+
+Important Requirements
+----------------------------------------------------------------------
+For SELECT ... FOR UPDATE to work correctly:
+
+1. SEPARATE CONNECTION PER THREAD
+   - Each thread MUST have its own database connection
+   - Sharing connections breaks the locking mechanism
+   - We implement this correctly in our code
+
+2. MANUAL TRANSACTION CONTROL
+   - Must disable autocommit
+   - Must explicitly call COMMIT or ROLLBACK
+   - Lock is held until COMMIT
+
+3. PROPER ERROR HANDLING
+   - Always ROLLBACK on error
+   - Otherwise lock is held indefinitely (until timeout)
+   - Can cause deadlocks if not careful
+
+COMPARISON WITH OTHER IMPLEMENTATIONS
+======================================================================
+
+Implementation 01 (Lost-update):
+  - Method: SELECT + Python increment + UPDATE
+  - Locking: None
+  - Result: ~90% data loss
+  - Errors: None
+  - Speed: ~140 ops/sec
+  - Code complexity: Low
+  - Correctness: INCORRECT
+
+Implementation 02 (SERIALIZABLE without retry):
+  - Method: SERIALIZABLE isolation
+  - Locking: Automatic conflict detection
+  - Result: Data loss
+  - Errors: Many serialization errors
+  - Speed: Variable
+  - Code complexity: Medium
+  - Correctness: INCORRECT
+
+Implementation 02 WITH RETRY:
+  - Method: SERIALIZABLE + automatic retry
+  - Locking: Automatic conflict detection
+  - Result: 92-100% correct (depends on max retries)
+  - Errors: Many (handled)
+  - Speed: ~23 ops/sec (very slow)
+  - Code complexity: High
+  - Correctness: CORRECT (with enough retries)
+
+Implementation 03 (Atomic in-place):
+  - Method: UPDATE counter = counter + 1
+  - Locking: Automatic row-level locking
+  - Result: 100% correct
+  - Errors: None
+  - Speed: ~122 ops/sec
+  - Code complexity: Very low (1 line)
+  - Correctness: CORRECT
+
+Implementation 04 (SELECT FOR UPDATE) - THIS ONE:
+  - Method: Explicit row-level locking
+  - Locking: SELECT ... FOR UPDATE
+  - Result: 100% correct
+  - Errors: 0
+  - Speed: 97.52 ops/sec
+  - Code complexity: Low-Medium
+  - Correctness: CORRECT
+
+PERFORMANCE COMPARISON
+----------------------------------------------------------------------
+Throughput (operations per second):
+
+  Implementation 01 (Lost-update):        ~140 ops/sec (WRONG)
+  Implementation 02 (SERIALIZABLE):       ~100 ops/sec (WRONG)
+  Implementation 02 WITH RETRY:           ~23 ops/sec  (CORRECT)
+  Implementation 03 (Atomic):             ~122 ops/sec (CORRECT)
+  Implementation 04 (SELECT FOR UPDATE):  97.52 ops/sec (CORRECT)
+
+Why is Implementation 04 slower than Implementation 03?
+
+1. READ-MODIFY-WRITE CYCLE
+   - Implementation 04: SELECT, increment in Python, UPDATE
+   - Implementation 03: Single atomic UPDATE
+   - More round-trips = slower
+
+2. NETWORK OVERHEAD
+   - Implementation 04: Two SQL statements per increment
+   - Implementation 03: One SQL statement per increment
+
+3. LOCK DURATION
+   - Implementation 04: Lock held during SELECT, Python code, UPDATE
+   - Implementation 03: Lock only during UPDATE
+   - Longer lock duration = more contention
+
+KEY TAKEAWAYS
+======================================================================
+
+1. SELECT ... FOR UPDATE IS A VALID SOLUTION
+   - Provides explicit control over locking
+   - Guaranteed correctness
+   - No retry logic needed
+
+2. USE WHEN YOU NEED READ-MODIFY-WRITE
+   - If you need to read data, perform complex logic, then write back
+   - Better than SERIALIZABLE + retry for simpler code
+   - More explicit than relying on isolation levels
+
+3. NOT IDEAL FOR SIMPLE COUNTERS
+   - Implementation 03 (atomic UPDATE) is simpler and faster
+   - Only use SELECT ... FOR UPDATE when you need complex logic
+   - The read-modify-write cycle has overhead
+
+4. PROPER IMPLEMENTATION IS CRITICAL
+   - Each thread needs its own connection
+   - Must use manual transaction control
+   - Must handle errors properly (ROLLBACK)
+   - Can cause deadlocks if used incorrectly
+
+5. COMPARE TO OTHER APPROACHES
+   - Simpler than SERIALIZABLE + retry
+   - More complex than atomic UPDATE
+   - Faster than SERIALIZABLE + retry
+   - Slower than atomic UPDATE
+
+WHEN TO USE SELECT ... FOR UPDATE
+----------------------------------------------------------------------
+Good use cases:
+- Inventory management with business rules
+- Order processing with validation
+- Reservations with availability checks
+- Account transfers with balance checks
+
+NOT good for:
+- Simple counters (use atomic UPDATE instead)
+- High-contention scenarios (too much waiting)
+- Read-only queries (unnecessary locking)
+
+======================================================================

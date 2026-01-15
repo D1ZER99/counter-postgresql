@@ -1,0 +1,203 @@
+======================================================================
+Implementation 02 WITH RETRY: SERIALIZABLE + Automatic Retry
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Isolation Level: SERIALIZABLE
+Retry Logic: ENABLED
+Max Retries per transaction: 50
+Backoff Strategy: Exponential (0.001 * 2^attempt seconds)
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-14 17:08:36.521
+End time: 2026-01-14 17:30:50.997
+Execution time: 1334.48 seconds
+Throughput: 74.94 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 100000
+Expected counter value: 100000
+Lost updates: 0
+Loss percentage: 0.00%
+
+ERROR STATISTICS AND RETRY ANALYSIS
+----------------------------------------------------------------------
+Successful transactions: 100,000
+Failed transactions: 0
+Serialization errors encountered: 142,993
+Other errors: 0
+Total retries performed: 142,993
+Average retries per successful transaction: 1.43
+Serialization error rate: 1.43 errors per success
+
+ANALYSIS - ANSWERS TO KEY QUESTIONS
+======================================================================
+
+Q1: Will there be any loss of values?
+----------------------------------------------------------------------
+ANSWER: NO - With retry logic enabled, ALL values are preserved!
+
+Result: 100000 / 100000 (100% correct)
+
+When a serialization error occurs, the transaction is automatically
+retried until it succeeds. This ensures no updates are lost.
+
+How it works:
+1. Transaction attempts to update counter
+2. If SerializationFailure error occurs, rollback
+3. Wait briefly (exponential backoff)
+4. Retry the transaction
+5. Repeat until success or max retries reached
+
+In this test:
+- 142,993 serialization errors were caught
+- 142,993 retries were performed
+- 100,000 transactions eventually succeeded
+- 0 transactions permanently failed
+
+Q2: Will there be any errors?
+----------------------------------------------------------------------
+ANSWER: YES - Serialization errors WILL occur, but they are HANDLED.
+
+Serialization errors encountered: 142,993
+
+PostgreSQL's SERIALIZABLE isolation level detects when concurrent
+transactions would violate serializability. When this happens,
+it throws a SerializationFailure error:
+  psycopg2.errors.SerializationFailure
+
+However, with retry logic enabled:
+- These errors are CAUGHT by the except block
+- The transaction is ROLLED BACK
+- A brief wait occurs (exponential backoff)
+- The transaction is RETRIED
+- Eventually succeeds (in most cases)
+
+The errors are still there, but the application handles them gracefully.
+
+Q3: Is it possible to get the correct result with SERIALIZABLE?
+----------------------------------------------------------------------
+ANSWER: YES - Retry logic achieves correct results!
+
+This test demonstrates that with proper retry logic:
+- 100% correct final value achieved
+- No updates lost
+- All serialization conflicts resolved
+
+Required retry pattern:
+
+```python
+attempts = 0
+while attempts < MAX_RETRIES:
+    attempts += 1
+    try:
+        conn.set_isolation_level(SERIALIZABLE)
+        # ... SELECT, compute, UPDATE ...
+        conn.commit()
+        break  # Success!
+    except SerializationFailure:
+        conn.rollback()
+        if attempts < MAX_RETRIES:
+            time.sleep(0.001 * 2**attempts)  # Exponential backoff
+        else:
+            # Handle permanent failure
+```
+
+Key components:
+1. Exception handling for SerializationFailure
+2. Rollback on failure
+3. Retry loop with max attempts
+4. Exponential backoff to reduce contention
+
+COMPARISON: WITH vs WITHOUT RETRY
+======================================================================
+
+WITHOUT Retry (Implementation 02 original):
+  - Serialization errors cause transaction failure
+  - Failed transactions = lost updates
+  - Result: Incorrect final value
+  - Faster execution (fewer operations)
+
+WITH Retry (THIS implementation):
+  - Serialization errors trigger automatic retry
+  - Retries continue until success
+  - Result: 100% correct final value
+  - Slower execution due to retry overhead
+  - Average 1.43 retries per success
+
+PERFORMANCE IMPACT OF RETRY
+----------------------------------------------------------------------
+Total operations: 100,000
+Total retries: 142,993
+Retry overhead: 143.0%
+Throughput: 74.94 operations/second
+
+The retry mechanism adds overhead but ensures correctness.
+This is the trade-off: slower but correct vs. faster but wrong.
+
+COMPARISON WITH OTHER IMPLEMENTATIONS
+======================================================================
+
+Implementation 01 (Lost-update):
+  - Method: SELECT + Python increment + UPDATE
+  - Result: ~90% data loss
+  - Errors: None (silent failure)
+  - Speed: ~140 ops/sec
+  - Correctness: INCORRECT
+
+Implementation 02 WITHOUT retry:
+  - Method: SERIALIZABLE isolation, no retry
+  - Result: Data loss due to failed transactions
+  - Errors: Many (unhandled)
+  - Speed: Variable
+  - Correctness: INCORRECT
+
+Implementation 02 WITH retry (THIS ONE):
+  - Method: SERIALIZABLE + automatic retry
+  - Result: 100% correct
+  - Errors: Many (but all handled)
+  - Speed: 74.94 ops/sec
+  - Correctness: CORRECT!
+
+Implementation 03 (Atomic in-place):
+  - Method: UPDATE counter = counter + 1
+  - Result: 100% correct
+  - Errors: None
+  - Speed: ~122 ops/sec
+  - Correctness: CORRECT!
+  - Code: SIMPLE (one line)
+
+KEY TAKEAWAYS
+======================================================================
+
+1. RETRY LOGIC IS ESSENTIAL with SERIALIZABLE
+   Without retry, serialization errors cause data loss.
+   With retry, correctness is guaranteed.
+
+2. EXPONENTIAL BACKOFF REDUCES CONTENTION
+   Waiting between retries gives other transactions time to complete.
+   This reduces the likelihood of repeated conflicts.
+
+3. SERIALIZABLE + RETRY IS A VALID SOLUTION
+   For complex read-modify-write operations, this approach works.
+   But it's more complex than atomic updates (Implementation 03).
+
+4. CHOOSE THE RIGHT TOOL
+   - Simple counters: Use atomic UPDATE (Implementation 03)
+   - Complex logic: Use SERIALIZABLE with retry (this approach)
+
+5. TRADE-OFFS ARE REAL
+   - Correctness requires overhead (retries, slower execution)
+   - But correctness is non-negotiable for production systems
+
+======================================================================

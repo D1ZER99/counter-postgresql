@@ -1,0 +1,166 @@
+======================================================================
+Implementation 03: In-Place Update (Atomic Increment)
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Update method: UPDATE counter = counter + 1 (atomic)
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-14 15:20:04.592
+End time: 2026-01-14 15:33:45.871
+Execution time: 821.28 seconds
+Throughput: 121.76 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 100000
+Expected counter value: 100000
+Lost updates: 0
+Loss percentage: 0.00%
+
+OPERATION STATISTICS
+----------------------------------------------------------------------
+Successful operations: 100,000
+Failed operations: 0
+Errors encountered: 0
+Success rate: 100.00%
+
+ANALYSIS
+======================================================================
+
+Why This Implementation Works
+----------------------------------------------------------------------
+This implementation uses an ATOMIC in-place update:
+
+  UPDATE user_counter SET counter = counter + 1 WHERE user_id = 1
+
+Key advantages:
+
+1. NO READ-MODIFY-WRITE CYCLE
+   - No SELECT statement needed
+   - The increment happens entirely within the database
+   - The database engine handles the read and write atomically
+
+2. NO RACE CONDITION
+   - Each UPDATE is atomic at the row level
+   - PostgreSQL uses row-level locking automatically
+   - Concurrent UPDATEs queue up and execute sequentially
+
+3. NO SPECIAL ISOLATION LEVEL NEEDED
+   - Works correctly with default READ COMMITTED isolation
+   - No need for SERIALIZABLE
+   - No serialization errors to handle
+
+4. NO EXPLICIT LOCKING NEEDED
+   - No SELECT FOR UPDATE required
+   - Database handles locking automatically
+
+5. SIMPLE CODE
+   - One line of SQL
+   - No retry logic needed
+   - No error handling for conflicts
+
+How PostgreSQL Handles Concurrent Updates
+----------------------------------------------------------------------
+When multiple transactions try to update the same row:
+
+1. First transaction acquires row-level lock
+2. Other transactions wait for the lock
+3. Each transaction reads the LATEST committed value
+4. Each transaction applies its increment
+5. Result: All increments are applied correctly
+
+Example with 3 concurrent transactions:
+  T1: UPDATE counter = counter + 1  (counter: 0 -> 1)
+  T2: waits... then UPDATE counter = counter + 1  (counter: 1 -> 2)
+  T3: waits... then UPDATE counter = counter + 1  (counter: 2 -> 3)
+  Final value: 3 (correct!)
+
+COMPARISON WITH OTHER IMPLEMENTATIONS
+======================================================================
+
+Implementation 01 (Lost-update):
+  - Method: SELECT + Python increment + UPDATE
+  - Result: ~90% data loss
+  - Errors: None (silent data loss)
+  - Speed: Fast but incorrect
+
+Implementation 02 (SERIALIZABLE):
+  - Method: SELECT + Python increment + UPDATE with SERIALIZABLE
+  - Result: Data loss without retry, correct with retry
+  - Errors: Many serialization errors
+  - Speed: Slow due to retries
+
+Implementation 03 (In-place update) - THIS ONE:
+  - Method: Atomic UPDATE counter = counter + 1
+  - Result: 100000 / 100000 (PERFECT!)
+  - Errors: 0
+  - Speed: 121.76 ops/sec
+
+PERFORMANCE COMPARISON
+----------------------------------------------------------------------
+Throughput comparison (operations per second):
+  - Implementation 01: ~140 ops/sec (but incorrect results)
+  - Implementation 02: ~50-100 ops/sec (with retries)
+  - Implementation 03: 121.76 ops/sec (THIS ONE)
+
+KEY TAKEAWAYS
+======================================================================
+
+1. ATOMIC OPERATIONS ARE THE SOLUTION
+   For simple counters, use: UPDATE counter = counter + 1
+   This is simpler, faster, and more reliable than complex locking.
+
+2. LET THE DATABASE DO THE WORK
+   Don't read-modify-write in your application.
+   Let the database handle the increment atomically.
+
+3. SIMPLICITY WINS
+   The simplest solution (one line of SQL) is often the best.
+   No retry logic, no error handling, no complex isolation levels.
+
+4. PERFORMANCE AND CORRECTNESS
+   This approach provides both correct results AND good performance.
+   You don't have to choose between speed and correctness.
+
+5. REAL-WORLD APPLICATIONS
+   This pattern is used everywhere:
+   - Social media likes (UPDATE likes = likes + 1)
+   - Video views (UPDATE views = views + 1)
+   - Inventory (UPDATE stock = stock - quantity)
+   - Banking (UPDATE balance = balance + amount)
+
+BEST PRACTICES
+----------------------------------------------------------------------
+When implementing counters or similar features:
+
+1. Use atomic updates whenever possible
+2. Avoid read-modify-write patterns in application code
+3. Let the database handle concurrency
+4. Keep transactions short
+5. Test with concurrent load
+
+SQL PATTERNS TO USE
+----------------------------------------------------------------------
+Increment:
+  UPDATE table SET counter = counter + 1 WHERE id = ?
+
+Decrement:
+  UPDATE table SET counter = counter - 1 WHERE id = ?
+
+Add value:
+  UPDATE table SET counter = counter + ? WHERE id = ?
+
+With return value:
+  UPDATE table SET counter = counter + 1 WHERE id = ? RETURNING counter
+
+======================================================================

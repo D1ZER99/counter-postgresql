@@ -1,0 +1,254 @@
+======================================================================
+Implementation 05: Optimistic Concurrency Control (OCC)
+======================================================================
+
+TEST CONFIGURATION
+----------------------------------------------------------------------
+Number of threads: 10
+Iterations per thread: 10,000
+Total operations: 100,000
+User ID: 1
+Method: Optimistic Concurrency Control with version field
+Max retries per operation: 100
+Database: counter_db
+Host: localhost:5432
+
+EXECUTION DETAILS
+----------------------------------------------------------------------
+Start time: 2026-01-14 18:20:33.124
+End time: 2026-01-15 00:55:18.957
+Execution time: 23685.83 seconds
+Throughput: 4.22 operations/second
+
+COUNTER VALUES
+----------------------------------------------------------------------
+Initial counter value: 0
+Final counter value: 91899
+Final version: 91899
+Expected counter value: 100000
+Lost updates: 8101
+Loss percentage: 8.10%
+
+OPERATION STATISTICS AND RETRY ANALYSIS
+----------------------------------------------------------------------
+Successful operations: 99,451
+Failed operations: 549
+Total retries performed: 1,051,414
+Average retries per successful operation: 10.57
+Operations that reached max retries: 549
+Errors encountered: 0
+Success rate: 99.45%
+Retry overhead: 1051.4%
+
+ANALYSIS
+======================================================================
+
+How Optimistic Concurrency Control Works
+----------------------------------------------------------------------
+Optimistic locking assumes conflicts are rare and detects them when
+they occur, rather than preventing them with locks.
+
+The Version Field Approach:
+
+1. READ phase (no locks):
+   SELECT counter, version FROM user_counter WHERE user_id = 1
+
+2. COMPUTE phase (in application):
+   counter = counter + 1
+   new_version = version + 1
+
+3. WRITE phase (conditional update):
+   UPDATE user_counter
+   SET counter = ?, version = ?
+   WHERE user_id = ? AND version = old_version
+
+4. CHECK phase:
+   if rowcount == 0:
+       # Conflict! Someone else updated it
+       # Retry from step 1
+   else:
+       # Success! Update was applied
+
+Transaction Flow with Conflict
+----------------------------------------------------------------------
+Time | Thread 1              | Thread 2              | DB State
+-----|----------------------|----------------------|----------
+t1   | SELECT (c=100, v=5)  | -                    | c=100,v=5
+t2   | -                    | SELECT (c=100, v=5)  | c=100,v=5
+t3   | c=101, v=6 (compute) | c=101, v=6 (compute) | c=100,v=5
+t4   | UPDATE WHERE v=5     | -                    | c=100,v=5
+t5   | rowcount=1 SUCCESS!  | -                    | c=101,v=6
+t6   | -                    | UPDATE WHERE v=5     | c=101,v=6
+t7   | -                    | rowcount=0 CONFLICT! | c=101,v=6
+t8   | -                    | RETRY: SELECT again  | c=101,v=6
+t9   | -                    | (c=101, v=6)         | c=101,v=6
+t10  | -                    | c=102, v=7 (compute) | c=101,v=6
+t11  | -                    | UPDATE WHERE v=6     | c=101,v=6
+t12  | -                    | rowcount=1 SUCCESS!  | c=102,v=7
+
+Result: Both increments applied after Thread 2 retried
+
+Why This Implementation Works
+----------------------------------------------------------------------
+Key advantages of Optimistic Concurrency Control:
+
+1. NO PESSIMISTIC LOCKS
+   - No SELECT FOR UPDATE needed
+   - Better concurrency when conflicts are rare
+   - Readers don't block writers, writers don't block readers
+
+2. NO DATABASE ERRORS
+   - No SerializationFailure exceptions
+   - Conflicts detected via rowcount, not exceptions
+   - Application has full control over retry logic
+
+3. WORKS WITH ANY ISOLATION LEVEL
+   - No need for SERIALIZABLE
+   - Works fine with READ COMMITTED (default)
+   - Lower database overhead
+
+4. APPLICATION-LEVEL RETRY
+   - Application decides when and how to retry
+   - Can implement custom backoff strategies
+   - Can log conflicts for monitoring
+
+5. VERSION FIELD PROVIDES AUDIT TRAIL
+   - Can track how many times a row has been updated
+   - Useful for debugging and monitoring
+
+Trade-offs: Optimistic vs Pessimistic Locking
+----------------------------------------------------------------------
+OPTIMISTIC (this implementation):
+  + Better for LOW contention scenarios
+  + No lock waiting time
+  + Better read concurrency
+  - More retries under HIGH contention
+  - Wasted work when conflicts occur
+  - Requires version field in schema
+
+PESSIMISTIC (SELECT FOR UPDATE):
+  + Better for HIGH contention scenarios
+  + No wasted work (operations wait, don't retry)
+  + Simpler (no version field needed)
+  - Threads wait for locks (can be slow)
+  - Readers and writers block each other
+  - Potential for deadlocks
+
+RESULTS FOR THIS TEST
+----------------------------------------------------------------------
+PARTIAL SUCCESS: 99,451/100,000 updates applied
+Total retries needed: 1,051,414
+Average 10.57 retries per successful operation
+Retry overhead: 1051.4% extra operations
+
+High retry rate - consider pessimistic locking for this workload.
+
+COMPARISON WITH OTHER IMPLEMENTATIONS
+======================================================================
+
+Implementation 01 (Lost-update):
+  - Method: SELECT + UPDATE (no protection)
+  - Result: ~90% data loss
+  - Retries: None
+  - Errors: None
+  - Speed: ~140 ops/sec
+  - Correctness: INCORRECT
+
+Implementation 02 (SERIALIZABLE without retry):
+  - Method: SERIALIZABLE isolation
+  - Result: Data loss
+  - Retries: None
+  - Errors: Many SerializationFailure
+  - Speed: ~100 ops/sec
+  - Correctness: INCORRECT
+
+Implementation 02 WITH RETRY:
+  - Method: SERIALIZABLE + retry
+  - Result: 92-100% correct
+  - Retries: Many (database-triggered)
+  - Errors: Many SerializationFailure (handled)
+  - Speed: ~23 ops/sec
+  - Correctness: CORRECT (if enough retries)
+
+Implementation 03 (Atomic in-place):
+  - Method: UPDATE counter = counter + 1
+  - Result: 100% correct
+  - Retries: None needed
+  - Errors: None
+  - Speed: ~122 ops/sec
+  - Correctness: CORRECT
+
+Implementation 04 (SELECT FOR UPDATE):
+  - Method: Pessimistic row locking
+  - Result: 100% correct
+  - Retries: None (threads wait for locks)
+  - Errors: None
+  - Speed: ~98 ops/sec
+  - Correctness: CORRECT
+
+Implementation 05 (Optimistic Locking) - THIS ONE:
+  - Method: Optimistic concurrency control
+  - Result: 91.90% correct
+  - Retries: 1,051,414 (application-triggered)
+  - Errors: 0
+  - Speed: 4.22 ops/sec
+  - Correctness: Mostly correct
+
+PERFORMANCE COMPARISON
+----------------------------------------------------------------------
+Throughput (operations per second):
+
+  1. Implementation 03 (Atomic):         ~122 ops/sec  (BEST)
+  2. Implementation 01 (Lost-update):    ~140 ops/sec  (WRONG)
+  3. Implementation 05 (OCC):             4.22 ops/sec  (THIS)
+  4. Implementation 04 (FOR UPDATE):     ~98 ops/sec
+  5. Implementation 02 (SERIAL):         ~100 ops/sec  (WRONG)
+  6. Implementation 02 WITH RETRY:       ~23 ops/sec   (SLOWEST)
+
+KEY TAKEAWAYS
+======================================================================
+
+1. OPTIMISTIC LOCKING IS A VALID APPROACH
+   - Works well when conflicts are relatively rare
+   - Provides good concurrency without locks
+   - Application has full control over conflict resolution
+
+2. VERSION FIELD IS THE KEY
+   - Enables conflict detection without database errors
+   - Each successful update increments the version
+   - Failed updates don't change the version
+   - Simple and effective mechanism
+
+3. CHOOSE BASED ON CONTENTION LEVEL
+   - LOW contention: Optimistic locking is efficient
+   - HIGH contention: Pessimistic locking is better
+   - This test has HIGH contention (10 threads, 1 row)
+   - Result: 10.57 retries per success
+
+4. STILL NOT AS GOOD AS ATOMIC UPDATES
+   - For simple counters, Implementation 03 is still best
+   - OCC is valuable when you need complex read-modify-write
+   - Use when you can't express the operation as a single UPDATE
+
+5. REAL-WORLD APPLICATIONS
+   - Online reservation systems
+   - Document editing (like Google Docs)
+   - Shopping carts and inventory
+   - Any scenario with occasional conflicts
+
+WHEN TO USE OPTIMISTIC CONCURRENCY CONTROL
+----------------------------------------------------------------------
+Good scenarios for OCC:
+- Low to moderate contention
+- Read-mostly workloads
+- Long-running transactions with business logic
+- When lock waiting would hurt user experience
+- Distributed systems where locking is expensive
+
+NOT good for:
+- High contention on single rows (use pessimistic locks)
+- Simple counters (use atomic UPDATE)
+- When retry overhead is unacceptable
+- Real-time systems with strict timing requirements
+
+======================================================================

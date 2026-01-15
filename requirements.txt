@@ -7,5 +7,12 @@ psycopg2-binary==2.9.9
 # Progress bar
 tqdm==4.66.1
 
+# Web framework for Implementation 06
+Flask==3.0.0
+waitress==3.0.0
+
+# HTTP client for testing
+requests==2.31.0
+
 # For connection pooling (if needed in later parts)
 # psycopg2-pool==1.1
