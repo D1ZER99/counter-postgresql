@@ -21,3 +21,6 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Summary draft
+_final_summary_draft.txt
