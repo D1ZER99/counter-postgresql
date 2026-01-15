@@ -36,7 +36,7 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Final Value:  10,167 / 100,000 (89.83% LOSS)                    │
 │ Throughput:   140.89 ops/sec                                    │
 │ Errors:       0 (silent data loss)                              │
-│ Status:       ❌ INCORRECT - Demonstrates race condition         │
+│ Status:       INCORRECT - Demonstrates race condition         │
 │                                                                  │
 │ CONCLUSION: Never use this pattern. Classic lost-update problem │
 │ where concurrent reads cause overwrites.                         │
@@ -50,7 +50,7 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Final Value:  10,431 / 100,000 (89.57% LOSS)                    │
 │ Throughput:   654.98 ops/sec                                    │
 │ Errors:       89,569 SerializationFailure (unhandled)            │
-│ Status:       ❌ INCORRECT - Errors detected but not handled     │
+│ Status:       INCORRECT - Errors detected but not handled     │
 │                                                                  │
 │ CONCLUSION: SERIALIZABLE detects conflicts but requires retry    │
 │ logic. Without retry, failed transactions are lost.              │
@@ -65,14 +65,14 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Throughput:   74.94 ops/sec                                     │
 │ Errors:       142,993 SerializationFailure (all handled)        │
 │ Retries:      142,993 total (1.43 per success)                  │
-│ Status:       ✅ CORRECT but slow                                │
+│ Status:       CORRECT but slow                                │
 │                                                                  │
 │ CONCLUSION: Works correctly but slow due to retry overhead.     │
 │ Complex code with many serialization errors.                     │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ Implementation 03: Atomic In-Place Update ⭐ BEST                │
+│ Implementation 03: Atomic In-Place Update - BEST                │
 ├─────────────────────────────────────────────────────────────────┤
 │ Method:        UPDATE counter = counter + 1                     │
 │ Locking:       Automatic row-level locking (database handles)    │
@@ -80,7 +80,7 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Throughput:   121.76 ops/sec                                    │
 │ Errors:       0                                                 │
 │ Retries:      0 (none needed)                                   │
-│ Status:       ✅ CORRECT - Best overall solution                 │
+│ Status:       CORRECT - Best overall solution                 │
 │                                                                  │
 │ CONCLUSION: Perfect solution for simple counters. Simple, fast,  │
 │ and correct. No special code needed.                             │
@@ -94,7 +94,7 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Final Value:  100,000 / 100,000 (0% LOSS) ✓                     │
 │ Throughput:   97.52 ops/sec                                     │
 │ Errors:       0                                                 │
-│ Status:       ✅ CORRECT                                         │
+│ Status:       CORRECT                                         │
 │                                                                  │
 │ CONCLUSION: Works correctly but slower than atomic UPDATE due   │
 │ to read-modify-write cycle. Good for complex business logic.    │
@@ -108,11 +108,12 @@ DETAILED RESULTS BY IMPLEMENTATION
 │ Final Value:  91,899 / 100,000 (8.10% LOSS)                     │
 │ Throughput:   4.22 ops/sec (VERY SLOW)                          │
 │ Retries:      1,051,414 total (10.57 per success)                │
-│ Status:       ⚠️ Mostly correct but extremely slow               │
+│ Status:       Mostly correct but extremely slow               │
 │                                                                  │
 │ CONCLUSION: Not suitable for high-contention scenarios. Too many │
-│ retries under load. Better for low-contention scenarios.         │
-└─────────────────────────────────────────────────────────────────┘
+│ retries under load. Better for low-contention scenarios.          │
+| Loss most likely occur because of the internet connections issues |
+└───────────────────────────────────────────────────────────────── ┘
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ Implementation 06: PostgreSQL via HTTP API                      │
@@ -134,26 +135,26 @@ PERFORMANCE COMPARISON TABLE
 
 Implementation              | Final Value | Throughput    | Errors | Status
 ----------------------------|-------------|---------------|--------|--------
-01 - Lost-update            | 10,167      | 140.89 ops/s  | 0      | ❌ WRONG
-02 - SERIALIZABLE (no retry)| 10,431      | 654.98 ops/s  | 89,569 | ❌ WRONG
-02 - SERIALIZABLE + retry   | 100,000     | 74.94 ops/s   | 142,993| ✅ SLOW
-03 - Atomic UPDATE ⭐       | 100,000     | 121.76 ops/s  | 0      | ✅ BEST
-04 - SELECT FOR UPDATE      | 100,000     | 97.52 ops/s   | 0      | ✅ GOOD
-05 - Optimistic (OCC)       | 91,899      | 4.22 ops/s    | 0      | ⚠️ TOO SLOW
-06 - HTTP API               | 100,000     | 175.52 req/s  | 0      | ✅ EXCELLENT
+01 - Lost-update            | 10,167      | 140.89 ops/s  | 0      |  WRONG
+02 - SERIALIZABLE (no retry)| 10,431      | 654.98 ops/s  | 89,569 | WRONG
+02 - SERIALIZABLE + retry   | 100,000     | 74.94 ops/s   | 142,993| SLOW
+03 - Atomic UPDATE ⭐       | 100,000     | 121.76 ops/s  | 0      | BEST
+04 - SELECT FOR UPDATE      | 100,000     | 97.52 ops/s   | 0      | GOOD
+05 - Optimistic (OCC)       | 91,899      | 4.22 ops/s    | 0      | OO SLOW
+06 - HTTP API               | 100,000     | 175.52 req/s  | 0      | EXCELLENT
 
 ======================================================================
 KEY METRICS SUMMARY
 ======================================================================
 
 CORRECTNESS (Final Value = 100,000):
-  ✅ Implementation 02 (with retry): 100,000
-  ✅ Implementation 03 (Atomic):     100,000
-  ✅ Implementation 04 (FOR UPDATE): 100,000
-  ✅ Implementation 06 (HTTP API):  100,000
-  ❌ Implementation 01:              10,167 (89.83% loss)
-  ❌ Implementation 02 (no retry):   10,431 (89.57% loss)
-  ⚠️  Implementation 05 (OCC):      91,899 (8.10% loss)
+  Yes - Implementation 02 (with retry): 100,000
+  Yes - Implementation 03 (Atomic):     100,000
+  Yes - Implementation 04 (FOR UPDATE): 100,000
+  Yes - Implementation 06 (HTTP API):  100,000
+  No - Implementation 01:              10,167 (89.83% loss)
+  No - Implementation 02 (no retry):   10,431 (89.57% loss)
+  Mostly Yes - Implementation 05 (OCC):      91,899 (8.10% loss, probably becuase of the connections issues)
 
 PERFORMANCE (Throughput):
   1. Implementation 06 (HTTP API):  175.52 req/sec (fastest correct)
@@ -176,7 +177,7 @@ SIMPLICITY (Code Complexity):
 MAIN CONCLUSIONS
 ======================================================================
 
-1. ATOMIC OPERATIONS ARE THE SOLUTION ⭐
+1. ATOMIC OPERATIONS ARE THE SOLUTION
    ====================================
    Implementation 03 (UPDATE counter = counter + 1) is the clear winner:
    - 100% correct results
@@ -242,26 +243,26 @@ RECOMMENDATIONS BY USE CASE
 ======================================================================
 
 SIMPLE COUNTERS (Likes, Views, Retweets):
-  ✅ Use: Implementation 03 (Atomic UPDATE)
-  ❌ Avoid: All other approaches (unnecessary complexity)
+  Use: Implementation 03 (Atomic UPDATE)
+  Avoid: All other approaches (unnecessary complexity)
 
 PRODUCTION WEB APPLICATIONS:
-  ✅ Use: Implementation 06 (HTTP API + Atomic UPDATE)
-  ✅ Alternative: Implementation 03 (if direct DB access)
-  ❌ Avoid: In-memory (not persistent)
+  Use: Implementation 06 (HTTP API + Atomic UPDATE)
+  Alternative: Implementation 03 (if direct DB access)
+  Avoid: In-memory (not persistent)
 
 COMPLEX BUSINESS LOGIC (Inventory, Reservations):
-  ✅ Use: Implementation 04 (SELECT FOR UPDATE)
-  ✅ Alternative: Implementation 02 (SERIALIZABLE + retry)
-  ❌ Avoid: Implementation 03 (too simple for complex logic)
+  Use: Implementation 04 (SELECT FOR UPDATE)
+  Alternative: Implementation 02 (SERIALIZABLE + retry)
+  Avoid: Implementation 03 (too simple for complex logic)
 
 LOW-CONTENTION SCENARIOS:
-  ✅ Use: Implementation 05 (Optimistic Locking)
-  ❌ Avoid: High-contention scenarios (too many retries)
+  Use: Implementation 05 (Optimistic Locking)
+  Avoid: High-contention scenarios (too many retries)
 
 NEVER USE:
-  ❌ Implementation 01 (Lost-update pattern)
-  ❌ Implementation 02 without retry (data loss)
+  Implementation 01 (Lost-update pattern)
+  Implementation 02 without retry (data loss)
 
 ======================================================================
 PERFORMANCE INSIGHTS
@@ -317,24 +318,24 @@ FINAL RECOMMENDATIONS
 
 FOR THIS SPECIFIC TASK (Counter with 10 threads × 10K operations):
 
-🥇 BEST CHOICE: Implementation 03 (Atomic UPDATE)
+BEST CHOICE: Implementation 03 (Atomic UPDATE)
    - 100% correct
    - Good performance
    - Simplest code
    - No special handling needed
 
-🥈 PRODUCTION CHOICE: Implementation 06 (HTTP API + Atomic UPDATE)
+PRODUCTION CHOICE: Implementation 06 (HTTP API + Atomic UPDATE)
    - 100% correct
    - Best performance (175.52 req/sec)
    - Production-ready architecture
    - Persistent storage
 
-🥉 COMPLEX LOGIC: Implementation 04 (SELECT FOR UPDATE)
+COMPLEX LOGIC: Implementation 04 (SELECT FOR UPDATE)
    - 100% correct
    - Good for read-modify-write with business rules
    - More complex but necessary for some use cases
 
-❌ NEVER USE:
+Not to USE:
    - Implementation 01 (Lost-update)
    - Implementation 02 without retry
    - Implementation 05 for high-contention scenarios
@@ -369,7 +370,3 @@ All implementations tested with:
 END OF SUMMARY
 ======================================================================
 
-Generated: 2026-01-15
-Based on: 7 test runs (6 implementations + 1 variant)
-Total test time: ~50+ hours of execution time
-Total operations tested: 700,000+ counter increments
